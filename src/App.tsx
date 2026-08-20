@@ -86,6 +86,11 @@ export function App() {
     await loadData();
   };
 
+  const handleDeleteVisita = async (id: string) => {
+    await dataService.deleteVisita(id);
+    await loadData();
+  };
+
   const handleUpdateSaldoMensal = async (valor: number) => {
     await dataService.setSaldoMensal(selectedAnoMes, valor);
     await loadData();
@@ -164,6 +169,7 @@ export function App() {
               setIsDetalhesOpen(true);
             }}
             onNavigateToLugares={handleNavigateToLugares}
+            onDeleteVisita={handleDeleteVisita}
           />
         )}
 

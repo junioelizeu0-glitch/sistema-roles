@@ -6,6 +6,7 @@ import {
   Utensils,
   ChevronRight,
   Clock,
+  Trash2,
 } from 'lucide-react';
 import type { Estabelecimento, SaldoAtualView, Visita } from '../types';
 import { QUALIFICACOES_PADRAO } from '../types';
@@ -20,6 +21,7 @@ interface DashboardProps {
   onOpenMarcarVisita: (est: Estabelecimento | null) => void;
   onOpenDetalhes: (est: Estabelecimento) => void;
   onNavigateToLugares: (filterStatus?: string) => void;
+  onDeleteVisita?: (id: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -32,10 +34,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenMarcarVisita,
   onOpenDetalhes,
   onNavigateToLugares,
+  onDeleteVisita,
 }) => {
   const formatCurrencyParts = (val: number) => {
     const formatted = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-    // Separa o "R$" do valor numérico para proporcionalidade perfeita
     const parts = formatted.split('\u00A0');
     if (parts.length === 2) {
       return { symbol: parts[0], amount: parts[1] };
@@ -46,13 +48,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const formatCurrency = (val: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
+  // Mapeamento de estabelecimentos ativos
+  const estMap = new Map(estabelecimentos.map(e => [e.id, e]));
+
+  // Filtrar apenas visitas cujos estabelecimentos ainda existem no sistema (evita órfãos)
+  const validVisitas = visitas.filter(v => estMap.has(v.estabelecimento_id));
+
   // Visitas do mês selecionado
-  const visitasDoMes = visitas.filter(v => v.data_visita.startsWith(selectedAnoMes));
+  const visitasDoMes = validVisitas.filter(v => v.data_visita.startsWith(selectedAnoMes));
 
   // Cálculo de gastos por categoria para o Donut Chart
   const categoriaGastoMap: Record<string, number> = {};
   visitasDoMes.forEach(v => {
-    const est = estabelecimentos.find(e => e.id === v.estabelecimento_id);
+    const est = estMap.get(v.estabelecimento_id);
     const cat = est?.categoria || 'Outros';
     categoriaGastoMap[cat] = (categoriaGastoMap[cat] || 0) + Number(v.valor_gasto);
   });
@@ -74,11 +82,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Lugares Pendentes
   const pendentes = estabelecimentos.filter(e => e.status === 'PENDENTE' || e.status === 'AGENDADO');
 
-  // Mapeamento de histórico por lugar
-  const estMap = new Map(estabelecimentos.map(e => [e.id, e]));
-
-  // Últimas Visitas realizadas
-  const ultimasVisitas = [...visitas]
+  // Últimas Visitas realizadas válidas
+  const ultimasVisitas = [...validVisitas]
     .sort((a, b) => new Date(b.data_visita).getTime() - new Date(a.data_visita).getTime())
     .slice(0, 5);
 
@@ -111,7 +116,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* 2. Top Metrics Grid (Valores com Tipografia Proporcional e Elegante) */}
+      {/* 2. Top Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {/* Card 1: Saldo Restante */}
         <div className="bg-white border border-slate-200 shadow-2xs hover:shadow-xs transition-all rounded-2xl p-5 flex flex-col justify-between space-y-3">
@@ -321,6 +326,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <th className="py-2 px-3 font-semibold">Data</th>
                     <th className="py-2 px-3 font-semibold">Nota</th>
                     <th className="py-2 px-3 text-right font-semibold">Valor Gasto</th>
+                    {onDeleteVisita && <th className="py-2 px-2 text-right font-semibold"></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -334,7 +340,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               onClick={() => est && onOpenDetalhes(est)}
                               className="hover:text-indigo-600 cursor-pointer block"
                             >
-                              {est?.nome || 'Estabelecimento'}
+                              {est?.nome || 'Lugar Excluído'}
                             </span>
                             <span className="text-[10px] font-normal text-slate-400">
                               {est?.categoria} • {est?.regiao}
@@ -361,6 +367,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <td className="py-3 px-3 text-right font-bold text-slate-900">
                           {formatCurrency(v.valor_gasto)}
                         </td>
+
+                        {onDeleteVisita && (
+                          <td className="py-3 px-2 text-right">
+                            <button
+                              onClick={() => {
+                                if (confirm('Deseja apagar este registro de visita?')) {
+                                  onDeleteVisita(v.id);
+                                }
+                              }}
+                              className="p-1 text-slate-300 hover:text-rose-600 transition-colors"
+                              title="Excluir visita"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

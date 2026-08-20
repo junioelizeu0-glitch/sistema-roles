@@ -218,13 +218,21 @@ export const dataService = {
 
   async deleteEstabelecimento(id: string): Promise<void> {
     if (isSupabaseConfigured && supabase) {
+      // Deletar também visitas associadas no Supabase para garantir limpeza em cascata
+      await supabase.from('visitas').delete().eq('estabelecimento_id', id);
       await supabase.from('estabelecimentos').delete().eq('id', id);
       return;
     }
 
-    const current = getLocalData<Estabelecimento[]>(STORAGE_KEYS.ESTABELECIMENTOS, INITIAL_ESTABELECIMENTOS);
-    const updated = current.filter(item => item.id !== id);
-    setLocalData(STORAGE_KEYS.ESTABELECIMENTOS, updated);
+    // 1. Remover estabelecimento do LocalStorage
+    const currentEsts = getLocalData<Estabelecimento[]>(STORAGE_KEYS.ESTABELECIMENTOS, INITIAL_ESTABELECIMENTOS);
+    const updatedEsts = currentEsts.filter(item => item.id !== id);
+    setLocalData(STORAGE_KEYS.ESTABELECIMENTOS, updatedEsts);
+
+    // 2. CORREÇÃO CRÍTICA: Excluir também todas as visitas associadas do LocalStorage!
+    const currentVisitas = getLocalData<Visita[]>(STORAGE_KEYS.VISITAS, INITIAL_VISITAS);
+    const updatedVisitas = currentVisitas.filter(v => v.estabelecimento_id !== id);
+    setLocalData(STORAGE_KEYS.VISITAS, updatedVisitas);
   },
 
   // === SALDO MENSAL ===
@@ -281,11 +289,20 @@ export const dataService = {
 
   // === VISITAS ===
   async getVisitas(): Promise<Visita[]> {
+    const ests = await this.getEstabelecimentos();
+    const estIds = new Set(ests.map(e => e.id));
+
+    let rawVisitas: Visita[] = [];
+
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase.from('visitas').select('*').order('data_visita', { ascending: false });
-      if (!error && data) return data as Visita[];
+      if (!error && data) rawVisitas = data as Visita[];
+    } else {
+      rawVisitas = getLocalData<Visita[]>(STORAGE_KEYS.VISITAS, INITIAL_VISITAS);
     }
-    return getLocalData<Visita[]>(STORAGE_KEYS.VISITAS, INITIAL_VISITAS);
+
+    // Filtrar visitas órfãs (cujo estabelecimento foi excluído)
+    return rawVisitas.filter(v => estIds.has(v.estabelecimento_id));
   },
 
   async addVisita(dados: Omit<Visita, 'id' | 'created_at'>): Promise<Visita> {
@@ -310,6 +327,17 @@ export const dataService = {
     setLocalData(STORAGE_KEYS.ESTABELECIMENTOS, updatedEsts);
 
     return newVisita;
+  },
+
+  async deleteVisita(id: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      await supabase.from('visitas').delete().eq('id', id);
+      return;
+    }
+
+    const visitas = getLocalData<Visita[]>(STORAGE_KEYS.VISITAS, INITIAL_VISITAS);
+    const updatedVisitas = visitas.filter(v => v.id !== id);
+    setLocalData(STORAGE_KEYS.VISITAS, updatedVisitas);
   },
 
   // === CATEGORIAS DINÂMICAS ===
@@ -386,15 +414,10 @@ export const dataService = {
 
   // === CALCULATED VIEW (v_saldo_atual) ===
   async getSaldoAtualView(anoMes: string = getCurrentAnoMes()): Promise<SaldoAtualView> {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase.from('v_saldo_atual').select('*').eq('ano_mes', anoMes).maybeSingle();
-      if (data) return data as SaldoAtualView;
-    }
-
     const saldoMensalObj = await this.getSaldoMensal(anoMes);
-    const visitas = await this.getVisitas();
+    const visitasValidas = await this.getVisitas();
 
-    const visitasDoMes = visitas.filter(v => v.data_visita.startsWith(anoMes));
+    const visitasDoMes = visitasValidas.filter(v => v.data_visita.startsWith(anoMes));
     const valorGastoTotal = visitasDoMes.reduce((acc, v) => acc + (Number(v.valor_gasto) || 0), 0);
 
     return {
